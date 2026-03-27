@@ -82,8 +82,9 @@ backend:
     storageClass: ""
     accessMode: ReadWriteOnce
     size: "20Gi"
-    # If you want to bind to a pre-existing PVC, set this name:
-    existingClaim: ""
+    # Note: StatefulSet volumeClaimTemplates create PVCs automatically.
+    # Pre-populate /app/outputs on the volume after first pod start:
+    #   oc cp outputs/ <pod>:/app/outputs/ -n monai
 
   # Probes — startup gives the model time to load before liveness kicks in
   startupProbe:

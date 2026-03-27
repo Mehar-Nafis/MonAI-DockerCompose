@@ -1,5 +1,5 @@
 apiVersion: apps/v1
-kind: Deployment
+kind: StatefulSet
 metadata:
   name: {{ include "monai-inference.fullname" . }}-backend
   namespace: {{ .Values.namespace }}
@@ -8,10 +8,13 @@ metadata:
     {{ include "monai-inference.labels" . | nindent 4 }}
 spec:
   replicas: {{ .Values.backend.replicaCount }}
-  # GPU inference is stateful (model in VRAM) — recreate ensures only one pod
-  # holds the GPU at a time during updates.
-  strategy:
-    type: Recreate
+  # serviceName binds the StatefulSet to the backend ClusterIP service for
+  # stable pod DNS: <pod>.<service>.<namespace>.svc.cluster.local
+  serviceName: {{ include "monai-inference.backendServiceName" . }}
+  # OrderedReady ensures the old pod releases the GPU before the new one starts
+  podManagementPolicy: OrderedReady
+  updateStrategy:
+    type: RollingUpdate
   selector:
     matchLabels:
       app.kubernetes.io/name: {{ include "monai-inference.name" . }}-backend
@@ -73,7 +76,7 @@ spec:
 
           # -------------------------------------------------------------------
           # Volume mounts
-          # /app/outputs  → PVC with model checkpoint + val samples
+          # /app/outputs  → PVC provisioned by volumeClaimTemplates (model + val)
           # /app/static   → emptyDir for heatmap temp files (ephemeral, per-pod)
           # -------------------------------------------------------------------
           volumeMounts:
@@ -95,16 +98,29 @@ spec:
             {{- toYaml .Values.backend.readinessProbe | nindent 12 }}
 
       volumes:
-        - name: outputs
-          {{- if .Values.backend.persistence.enabled }}
-          persistentVolumeClaim:
-            claimName: {{ if .Values.backend.persistence.existingClaim }}
-                         {{- .Values.backend.persistence.existingClaim }}
-                       {{- else }}
-                         {{- printf "%s-outputs" (include "monai-inference.fullname" .) }}
-                       {{- end }}
-          {{- else }}
-          emptyDir: {}
-          {{- end }}
         - name: heatmaps
           emptyDir: {}
+
+  # ---------------------------------------------------------------------------
+  # volumeClaimTemplates — StatefulSet manages the PVC lifecycle.
+  # Each pod replica gets its own PVC named outputs-<pod-name>.
+  # The checkpoint and val_samples must be pre-populated on the volume before
+  # the pod starts (copy via oc cp or mount a pre-seeded NFS/OCS share).
+  # ---------------------------------------------------------------------------
+  {{- if .Values.backend.persistence.enabled }}
+  volumeClaimTemplates:
+    - metadata:
+        name: outputs
+        labels:
+          app.kubernetes.io/component: backend
+          {{ include "monai-inference.labels" . | nindent 10 }}
+      spec:
+        accessModes:
+          - {{ .Values.backend.persistence.accessMode }}
+        resources:
+          requests:
+            storage: {{ .Values.backend.persistence.size }}
+        {{- if .Values.backend.persistence.storageClass }}
+        storageClassName: {{ .Values.backend.persistence.storageClass }}
+        {{- end }}
+  {{- end }}
