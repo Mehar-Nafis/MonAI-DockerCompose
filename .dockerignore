@@ -1,0 +1,10 @@
+node_modules/
+frontend/node_modules/
+__pycache__/
+*.pyc
+*.ipynb
+.git/
+*.log
+backend/static/heatmaps/*
+backend/data/
+backend/.env
