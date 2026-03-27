@@ -1,0 +1,12 @@
+apiVersion: v2
+name: monai-inference
+description: MONAI chest X-ray inference service (FastAPI backend + React frontend)
+type: application
+version: 1.0.0
+appVersion: "1.0.0"
+keywords:
+  - monai
+  - inference
+  - medical-imaging
+  - gpu
+home: https://github.com/Mehar-Nafis/MonAI-DockerCompose

@@ -1,0 +1,44 @@
+# =============================================================================
+# OpenShift SCC bindings
+#
+# Both the backend (nvidia/cuda base image → runs as root) and the frontend
+# (nginx:alpine → listens on port 80 as root) require the anyuid SCC.
+#
+# The ClusterRoleBinding grants the anyuid SCC ClusterRole to each
+# ServiceAccount.  Scoped by namespace via the subjects[].namespace field.
+#
+# Prerequisite: the deploying user/SA must have permission to bind SCCs.
+# In most OpenShift clusters this requires cluster-admin or a delegated role.
+# =============================================================================
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "monai-inference.fullname" . }}-backend-anyuid
+  labels:
+    app.kubernetes.io/component: backend
+    {{ include "monai-inference.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ .Values.scc.anyuidClusterRole }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "monai-inference.backendServiceAccountName" . }}
+    namespace: {{ .Values.namespace }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "monai-inference.fullname" . }}-frontend-anyuid
+  labels:
+    app.kubernetes.io/component: frontend
+    {{ include "monai-inference.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ .Values.scc.anyuidClusterRole }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "monai-inference.frontendServiceAccountName" . }}
+    namespace: {{ .Values.namespace }}

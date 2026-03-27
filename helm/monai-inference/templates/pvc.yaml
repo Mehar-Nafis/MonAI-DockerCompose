@@ -1,0 +1,25 @@
+{{- if .Values.backend.persistence.enabled }}
+{{- if not .Values.backend.persistence.existingClaim }}
+# PersistentVolumeClaim for /app/outputs inside the backend pod.
+# Stores the model checkpoint (.pt) and validation sample pickle.
+# Must be pre-populated (copy files in) before the backend pod starts,
+# OR mount the same NFS/OCS share that already holds the files.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "monai-inference.fullname" . }}-outputs
+  namespace: {{ .Values.namespace }}
+  labels:
+    app.kubernetes.io/component: backend
+    {{ include "monai-inference.labels" . | nindent 4 }}
+spec:
+  accessModes:
+    - {{ .Values.backend.persistence.accessMode }}
+  resources:
+    requests:
+      storage: {{ .Values.backend.persistence.size }}
+  {{- if .Values.backend.persistence.storageClass }}
+  storageClassName: {{ .Values.backend.persistence.storageClass }}
+  {{- end }}
+{{- end }}
+{{- end }}

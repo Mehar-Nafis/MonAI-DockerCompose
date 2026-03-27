@@ -1,0 +1,30 @@
+# =============================================================================
+# values-c845.yaml — Deploy fully on c845
+#
+# Node:   c845 = NVIDIA RTX PRO 6000 Blackwell Server Edition ×6
+#                (97 GB each, Blackwell, compute 12.0)
+#
+# Both backend AND frontend are pinned to c845.
+# Allocating 1 of the 6 available GPUs for inference.
+#
+# Usage:
+#   helm install monai ./helm/monai-inference \
+#     -n monai --create-namespace \
+#     -f helm/monai-inference/values-c845.yaml
+# =============================================================================
+
+nodeTarget: "c845"
+
+backend:
+  gpu:
+    count: "1"
+    productAffinity: true   # prefers nvidia.com/gpu.product=NVIDIA-RTX-PRO-6000-Blackwell-Server-Edition
+  resources:
+    limits:
+      cpu: "16"
+      memory: "32Gi"
+      nvidia.com/gpu: "1"
+    requests:
+      cpu: "8"
+      memory: "16Gi"
+      nvidia.com/gpu: "1"

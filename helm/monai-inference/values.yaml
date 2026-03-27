@@ -1,0 +1,163 @@
+# =============================================================================
+# monai-inference — default values
+# =============================================================================
+#
+# NODE TARGETING
+# --------------
+# Controls which physical nodes the workloads are scheduled on.
+#
+#   nodeTarget: "wn"   → backend on wn1 (worker1), frontend on wn2 (worker2)
+#                         Both nodes carry NVIDIA L40S GPUs.
+#
+#   nodeTarget: "c845" → backend AND frontend on c845 (worker3)
+#                         Node carries 6x NVIDIA RTX PRO 6000 Blackwell GPUs.
+#
+# Override at install time:
+#   helm install monai ./helm/monai-inference --set nodeTarget=wn
+#   helm install monai ./helm/monai-inference --set nodeTarget=c845
+#
+# Or use a values file:
+#   helm install monai ./helm/monai-inference -f helm/monai-inference/values-wn.yaml
+#   helm install monai ./helm/monai-inference -f helm/monai-inference/values-c845.yaml
+#
+nodeTarget: "wn"
+
+# =============================================================================
+# Container images
+# Push your images to the registry before deploying.
+# Default assumes OpenShift internal registry; adjust for external registry.
+# =============================================================================
+image:
+  backend:
+    # Internal registry example:
+    #   image-registry.openshift-image-registry.svc:5000/<namespace>/monai-backend
+    repository: "image-registry.openshift-image-registry.svc:5000/monai/monai-backend"
+    tag: "latest"
+    pullPolicy: IfNotPresent
+  frontend:
+    repository: "image-registry.openshift-image-registry.svc:5000/monai/monai-frontend"
+    tag: "latest"
+    pullPolicy: IfNotPresent
+
+# Optional: image pull secret name (leave empty if registry is public or already logged in)
+imagePullSecrets: []
+# - name: my-registry-secret
+
+# =============================================================================
+# Backend (FastAPI + MONAI inference)
+# =============================================================================
+backend:
+  replicaCount: 1
+
+  # GPU resource request — must match what the NVIDIA device-plugin exposes
+  gpu:
+    # Number of GPUs to allocate per pod
+    count: "1"
+    # Set to true to also add a nodeAffinity rule for the specific GPU product.
+    # Useful when nodeTarget="c845" to ensure the Blackwell GPU is selected
+    # rather than any GPU-capable node.
+    productAffinity: true
+
+  resources:
+    limits:
+      cpu: "8"
+      memory: "16Gi"
+      nvidia.com/gpu: "1"
+    requests:
+      cpu: "4"
+      memory: "8Gi"
+      nvidia.com/gpu: "1"
+
+  # Environment variables injected into the backend container
+  env:
+    CKPT_PATH: "/app/outputs/checkpoints/best_cxr_multilabel_3.pt"
+    VAL_LOADER_PATH: "/app/outputs/val_samples.pkl"
+    TEMP_DIR: "/app/static/heatmaps"
+    AMP_ENABLED: "true"
+
+  # Persistent volume for /app/outputs (model checkpoint + val samples)
+  persistence:
+    enabled: true
+    # Leave empty to use the cluster default StorageClass
+    storageClass: ""
+    accessMode: ReadWriteOnce
+    size: "20Gi"
+    # If you want to bind to a pre-existing PVC, set this name:
+    existingClaim: ""
+
+  # Probes — startup gives the model time to load before liveness kicks in
+  startupProbe:
+    httpGet:
+      path: /health
+      port: 8000
+    initialDelaySeconds: 30
+    periodSeconds: 10
+    failureThreshold: 12     # 2 minutes total before giving up
+  livenessProbe:
+    httpGet:
+      path: /health
+      port: 8000
+    periodSeconds: 30
+    failureThreshold: 3
+  readinessProbe:
+    httpGet:
+      path: /health
+      port: 8000
+    periodSeconds: 10
+    failureThreshold: 3
+
+  # GPU node tolerations — add if GPU nodes carry a NoSchedule taint
+  # e.g. nvidia.com/gpu=present:NoSchedule
+  tolerations: []
+  # - key: "nvidia.com/gpu"
+  #   operator: "Exists"
+  #   effect: "NoSchedule"
+
+# =============================================================================
+# Frontend (React SPA served by nginx)
+# =============================================================================
+frontend:
+  replicaCount: 1
+
+  resources:
+    limits:
+      cpu: "1"
+      memory: "512Mi"
+    requests:
+      cpu: "250m"
+      memory: "256Mi"
+
+  # nginx listens on port 80 inside the container.
+  # OpenShift restricts port 80 unless the pod runs with anyuid SCC
+  # (handled automatically by the scc-rolebinding.yaml template).
+  containerPort: 80
+
+  tolerations: []
+
+# =============================================================================
+# OpenShift Route (replaces Kubernetes Ingress)
+# =============================================================================
+route:
+  enabled: true
+  # Leave host empty to let OpenShift auto-assign a hostname
+  host: ""
+  # TLS termination: "edge" (TLS at router), "passthrough", or "reencrypt"
+  tls:
+    enabled: true
+    termination: edge
+
+# =============================================================================
+# OpenShift Security Context Constraints
+# =============================================================================
+# The backend CUDA container and the nginx frontend both need the anyuid SCC
+# to run as their required UIDs (root for CUDA, root for nginx:alpine port 80).
+# The chart creates a dedicated ServiceAccount + ClusterRoleBinding for each.
+scc:
+  # anyuid SCC ClusterRole name in OpenShift 4.x
+  anyuidClusterRole: "system:openshift:scc:anyuid"
+
+# =============================================================================
+# Namespace (used in SCC RoleBinding subjects)
+# Must match the namespace you deploy into: helm install ... -n <namespace>
+# =============================================================================
+namespace: "monai"

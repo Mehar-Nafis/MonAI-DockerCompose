@@ -1,0 +1,30 @@
+{{- if .Values.route.enabled }}
+# OpenShift Route — exposes the frontend to external traffic.
+# This is the OpenShift-native equivalent of a Kubernetes Ingress.
+# The Route is created in the same namespace as the deployment.
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: {{ include "monai-inference.fullname" . }}-frontend
+  namespace: {{ .Values.namespace }}
+  labels:
+    app.kubernetes.io/component: frontend
+    {{ include "monai-inference.labels" . | nindent 4 }}
+spec:
+  {{- if .Values.route.host }}
+  host: {{ .Values.route.host }}
+  {{- end }}
+  # Route traffic to the frontend Service
+  to:
+    kind: Service
+    name: {{ include "monai-inference.fullname" . }}-frontend
+    weight: 100
+  port:
+    targetPort: http
+  {{- if .Values.route.tls.enabled }}
+  tls:
+    termination: {{ .Values.route.tls.termination }}
+    insecureEdgeTerminationPolicy: Redirect
+  {{- end }}
+  wildcardPolicy: None
+{{- end }}

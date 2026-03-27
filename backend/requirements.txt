@@ -3,6 +3,7 @@ fastapi>=0.104.0
 uvicorn[standard]>=0.24.0
 python-dotenv>=1.0.0
 pydantic>=2.0.0
+python-multipart>=0.0.7
 
 # PyTorch with CUDA 12.1 support
 --extra-index-url https://download.pytorch.org/whl/cu121

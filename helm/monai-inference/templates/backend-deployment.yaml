@@ -1,0 +1,110 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "monai-inference.fullname" . }}-backend
+  namespace: {{ .Values.namespace }}
+  labels:
+    app.kubernetes.io/component: backend
+    {{ include "monai-inference.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.backend.replicaCount }}
+  # GPU inference is stateful (model in VRAM) — recreate ensures only one pod
+  # holds the GPU at a time during updates.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "monai-inference.name" . }}-backend
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ include "monai-inference.name" . }}-backend
+        app.kubernetes.io/instance: {{ .Release.Name }}
+        app.kubernetes.io/component: backend
+    spec:
+      serviceAccountName: {{ include "monai-inference.backendServiceAccountName" . }}
+
+      # -----------------------------------------------------------------------
+      # Node placement — controlled by --set nodeTarget=wn|c845
+      # -----------------------------------------------------------------------
+      nodeSelector:
+        {{ include "monai-inference.backendNodeSelector" . | nindent 8 }}
+
+      # GPU product affinity (preferred, not required — degrades gracefully)
+      {{ include "monai-inference.gpuProductAffinity" . | nindent 6 }}
+
+      {{- with .Values.backend.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+
+      # -----------------------------------------------------------------------
+      # Security context
+      # The CUDA base image (nvidia/cuda:12.1.1-runtime-ubuntu22.04) runs as
+      # root (UID 0).  The anyuid SCC binding in scc-rolebinding.yaml allows
+      # this on OpenShift.
+      # -----------------------------------------------------------------------
+      securityContext:
+        runAsUser: 0
+
+      containers:
+        - name: backend
+          image: "{{ .Values.image.backend.repository }}:{{ .Values.image.backend.tag }}"
+          imagePullPolicy: {{ .Values.image.backend.pullPolicy }}
+
+          ports:
+            - name: http
+              containerPort: 8000
+              protocol: TCP
+
+          # All env vars come from the ConfigMap — no hardcoded values in the pod spec
+          envFrom:
+            - configMapRef:
+                name: {{ include "monai-inference.fullname" . }}-backend-env
+
+          resources:
+            {{- toYaml .Values.backend.resources | nindent 12 }}
+
+          # -------------------------------------------------------------------
+          # Volume mounts
+          # /app/outputs  → PVC with model checkpoint + val samples
+          # /app/static   → emptyDir for heatmap temp files (ephemeral, per-pod)
+          # -------------------------------------------------------------------
+          volumeMounts:
+            - name: outputs
+              mountPath: /app/outputs
+            - name: heatmaps
+              mountPath: /app/static/heatmaps
+
+          # -------------------------------------------------------------------
+          # Probes
+          # startupProbe gives the model time to load (warm-up pass + disk IO)
+          # before liveness/readiness begin checking.
+          # -------------------------------------------------------------------
+          startupProbe:
+            {{- toYaml .Values.backend.startupProbe | nindent 12 }}
+          livenessProbe:
+            {{- toYaml .Values.backend.livenessProbe | nindent 12 }}
+          readinessProbe:
+            {{- toYaml .Values.backend.readinessProbe | nindent 12 }}
+
+      volumes:
+        - name: outputs
+          {{- if .Values.backend.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ if .Values.backend.persistence.existingClaim }}
+                         {{- .Values.backend.persistence.existingClaim }}
+                       {{- else }}
+                         {{- printf "%s-outputs" (include "monai-inference.fullname" .) }}
+                       {{- end }}
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+        - name: heatmaps
+          emptyDir: {}
